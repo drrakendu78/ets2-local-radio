@@ -1,0 +1,42 @@
+﻿body.dark {
+    color: #ffffff;
+    background-color: #202132;
+}
+
+.dark .modal-content {
+    background-color: #202132;
+}
+
+.dark .modal-header {
+    border: none;
+}
+
+.dark .modal-footer {
+    border: none;
+}
+
+.dark .close {
+    color: #ffffff;
+}
+
+.dark .thumbnail {
+    background-color: #555970;
+    border: 1px solid #555970;
+    color: #ffffff;
+}
+
+.dark .signal {
+    background-color: #191a28;
+}
+
+.dark .btn-default {
+    background-color: #191a28;
+}
+
+.dark .music-controller {
+    background: #202132;
+}
+
+.dark #koenvhLogo {
+  filter: invert(100%);
+}

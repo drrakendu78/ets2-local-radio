@@ -1,0 +1,15 @@
+{
+  "name": "ets2-local-radio",
+  "version": "1.0.0",
+  "description": "ETS2/ATS Local Radio - Listen to local radio stations while playing Euro Truck Simulator 2 or American Truck Simulator",
+  "type": "module",
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "tauri": "tauri"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0"
+  }
+}
