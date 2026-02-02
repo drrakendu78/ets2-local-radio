@@ -1,0 +1,2 @@
+src-tauri/** linguist-detectable=true
+*.rs linguist-detectable=true
