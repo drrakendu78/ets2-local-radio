@@ -32,6 +32,10 @@ var g_show_all = false;
 var g_darkThm = false;
 var g_initial_received = false;
 
+// Legacy PeerJS variables (kept for compatibility, no longer used)
+var conn = null;
+var controlRemote = false;
+
 function initialise() {
     console.log("Start init");
 
@@ -655,7 +659,9 @@ function refreshStations() {
             available_stations.push({
                 url: stations[key][j]['url'],
                 country: key,
-                volume: volume
+                volume: volume,
+                name: stations[key][j]['name'],
+                logo: stations[key][j]['logo']
             });
 
             //Check whether the station distance can reached here:

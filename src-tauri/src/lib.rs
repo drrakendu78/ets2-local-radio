@@ -1,9 +1,13 @@
 //! ETS2/ATS Local Radio - Tauri Backend
 
+mod remote;
+
+use remote::RemoteServer;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use tauri::{Manager, State};
 
@@ -44,6 +48,9 @@ pub struct AppState {
     pub current_game: Mutex<String>,
     pub language: Mutex<String>,
     pub config_path: PathBuf,
+    pub remote_server: Arc<RemoteServer>,
+    pub overlay_bridge: Mutex<Option<Child>>,
+    pub overlay_connected: Mutex<bool>,
 }
 
 impl AppState {
@@ -54,6 +61,9 @@ impl AppState {
             current_game: Mutex::new("ets2".to_string()),
             language: Mutex::new("en-GB".to_string()),
             config_path,
+            remote_server: Arc::new(RemoteServer::new()),
+            overlay_bridge: Mutex::new(None),
+            overlay_connected: Mutex::new(false),
         }
     }
 
@@ -156,6 +166,342 @@ fn commands_get(state: State<'_, Arc<AppState>>) -> CommandData {
         action: None,
         amount: None,
     }
+}
+
+// ============================================================================
+// Remote Control Commands
+// ============================================================================
+
+#[tauri::command]
+fn remote_enable(state: State<'_, Arc<AppState>>) -> Result<String, String> {
+    let server = state.remote_server.clone();
+
+    // Start WebSocket server in background if not already running
+    if !*server.enabled.lock().unwrap() {
+        let server_clone = server.clone();
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async {
+                if let Err(e) = remote::start_server(server_clone).await {
+                    eprintln!("Remote server error: {}", e);
+                }
+            });
+        });
+    }
+
+    // Generate QR code and return data URL
+    remote::enable_remote(&server)
+}
+
+#[tauri::command]
+fn remote_disable(state: State<'_, Arc<AppState>>) {
+    remote::disable_remote(&state.remote_server);
+}
+
+#[tauri::command]
+fn remote_status(state: State<'_, Arc<AppState>>) -> bool {
+    *state.remote_server.enabled.lock().unwrap()
+}
+
+#[tauri::command]
+fn remote_get_url(state: State<'_, Arc<AppState>>) -> Result<String, String> {
+    remote::get_remote_url(&state.remote_server)
+}
+
+#[tauri::command]
+fn remote_update_state(
+    station_id: String,
+    station_name: String,
+    country: String,
+    volume: f64,
+    playing: bool,
+    muted: bool,
+    state: State<'_, Arc<AppState>>,
+) {
+    let radio_state = remote::messages::RadioState {
+        station_id,
+        station_name,
+        country,
+        volume,
+        playing,
+        muted,
+    };
+    state.remote_server.update_state(radio_state);
+}
+
+#[tauri::command]
+fn remote_get_command_rx(state: State<'_, Arc<AppState>>) -> Option<String> {
+    // Pop next command from queue
+    state.remote_server.pop_command()
+}
+
+// ============================================================================
+// Overlay Bridge Commands
+// ============================================================================
+
+const OVERLAY_BRIDGE_PORT: u16 = 8332;
+
+/// Start the OverlayBridge.exe process
+#[tauri::command]
+fn overlay_start(app_handle: tauri::AppHandle, state: State<'_, Arc<AppState>>) -> Result<bool, String> {
+    let mut bridge = state.overlay_bridge.lock().unwrap();
+
+    // Check if already running
+    if let Some(ref mut child) = *bridge {
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                // Process has exited, we can restart
+            }
+            Ok(None) => {
+                // Still running
+                return Ok(true);
+            }
+            Err(_) => {}
+        }
+    }
+
+    // Find OverlayBridge.exe - try multiple locations
+    // Use short paths to avoid issues with EasyHook and long path prefixes
+    let exe_path = {
+        // Try local development path first (shorter path, more reliable)
+        let dev_path = PathBuf::from("c:\\Users\\djame\\Documents\\projet\\ets2-local-radio-tauri\\src-tauri\\overlay-bridge\\bin\\Release\\OverlayBridge.exe");
+        if dev_path.exists() {
+            Some(dev_path)
+        } else {
+            None
+        }
+    }.or_else(|| {
+        // Try target/debug path
+        let dev_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("overlay-bridge")
+            .join("bin")
+            .join("Release")
+            .join("OverlayBridge.exe");
+        if dev_path.exists() {
+            Some(dev_path)
+        } else {
+            None
+        }
+    }).or_else(|| {
+        // Try resource path (production build)
+        app_handle
+            .path()
+            .resolve("overlay-bridge/bin/Release/OverlayBridge.exe", tauri::path::BaseDirectory::Resource)
+            .ok()
+            .filter(|p| p.exists())
+    }).ok_or_else(|| "OverlayBridge.exe not found. Make sure it's compiled.".to_string())?;
+
+    println!("Starting OverlayBridge from: {:?}", exe_path);
+
+    // Start the process with admin elevation using PowerShell Start-Process -Verb RunAs
+    // This will show UAC prompt for OverlayBridge only, not the whole app
+    let exe_str = exe_path.to_string_lossy();
+    let exe_dir = exe_path.parent().unwrap().to_string_lossy();
+
+    // Use -Wait to ensure PowerShell waits for the elevated process to start
+    // Use -WindowStyle Hidden to minimize the PowerShell window
+    // Set WorkingDirectory to ensure EasyHook can find all DLLs
+    let child = Command::new("powershell")
+        .args([
+            "-WindowStyle", "Hidden",
+            "-Command",
+            &format!(
+                "Start-Process -FilePath '{}' -ArgumentList '{}' -Verb RunAs -WindowStyle Normal -WorkingDirectory '{}'",
+                exe_str,
+                OVERLAY_BRIDGE_PORT,
+                exe_dir
+            )
+        ])
+        .spawn()
+        .map_err(|e| format!("Failed to start OverlayBridge: {}", e))?;
+
+    *bridge = Some(child);
+
+    // Give it time for UAC prompt + startup
+    std::thread::sleep(std::time::Duration::from_millis(2500));
+
+    Ok(true)
+}
+
+/// Stop the OverlayBridge.exe process
+#[tauri::command]
+fn overlay_stop(state: State<'_, Arc<AppState>>) -> bool {
+    let mut bridge = state.overlay_bridge.lock().unwrap();
+    if let Some(ref mut child) = *bridge {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    *bridge = None;
+    *state.overlay_connected.lock().unwrap() = false;
+    true
+}
+
+/// Send a command to OverlayBridge via WebSocket
+fn send_overlay_command(command: &str) -> Result<String, String> {
+    send_overlay_command_with_timeout(command, 5)
+}
+
+/// Send a command with custom timeout (for attach which takes longer)
+fn send_overlay_command_with_timeout(command: &str, timeout_secs: u64) -> Result<String, String> {
+    use std::io::{Read, Write};
+    use std::net::TcpStream;
+    use std::time::Duration;
+
+    let addr = format!("127.0.0.1:{}", OVERLAY_BRIDGE_PORT);
+
+    let mut stream = TcpStream::connect_timeout(
+        &addr.parse().unwrap(),
+        Duration::from_secs(2)
+    ).map_err(|e| format!("Connection failed: {}", e))?;
+
+    stream.set_read_timeout(Some(Duration::from_secs(timeout_secs))).ok();
+    stream.set_write_timeout(Some(Duration::from_secs(timeout_secs))).ok();
+
+    // WebSocket handshake
+    use base64::Engine;
+    let key = base64::engine::general_purpose::STANDARD.encode(rand::random::<[u8; 16]>());
+    let request = format!(
+        "GET / HTTP/1.1\r\n\
+        Host: 127.0.0.1:{}\r\n\
+        Upgrade: websocket\r\n\
+        Connection: Upgrade\r\n\
+        Sec-WebSocket-Key: {}\r\n\
+        Sec-WebSocket-Version: 13\r\n\r\n",
+        OVERLAY_BRIDGE_PORT, key
+    );
+
+    stream.write_all(request.as_bytes())
+        .map_err(|e| format!("Failed to send handshake: {}", e))?;
+
+    // Read handshake response
+    let mut response = [0u8; 1024];
+    let n = stream.read(&mut response)
+        .map_err(|e| format!("Failed to read handshake: {}", e))?;
+
+    let response_str = String::from_utf8_lossy(&response[..n]);
+    if !response_str.contains("101") {
+        return Err("WebSocket handshake failed".to_string());
+    }
+
+    // Send command as WebSocket frame
+    let payload = command.as_bytes();
+    let mut frame = Vec::new();
+
+    frame.push(0x81); // Text frame, FIN
+
+    if payload.len() < 126 {
+        frame.push(0x80 | payload.len() as u8); // Masked
+    } else if payload.len() < 65536 {
+        frame.push(0x80 | 126);
+        frame.push((payload.len() >> 8) as u8);
+        frame.push((payload.len() & 0xFF) as u8);
+    } else {
+        return Err("Payload too large".to_string());
+    }
+
+    // Masking key
+    let mask: [u8; 4] = rand::random();
+    frame.extend_from_slice(&mask);
+
+    // Masked payload
+    for (i, byte) in payload.iter().enumerate() {
+        frame.push(byte ^ mask[i % 4]);
+    }
+
+    // First, read and discard the initial status message sent on connect
+    let mut header = [0u8; 2];
+    stream.read_exact(&mut header)
+        .map_err(|e| format!("Failed to read initial status header: {}", e))?;
+
+    let initial_len = (header[1] & 0x7F) as usize;
+    let mut initial_payload = vec![0u8; initial_len];
+    stream.read_exact(&mut initial_payload)
+        .map_err(|e| format!("Failed to read initial status: {}", e))?;
+
+    // Now send the actual command
+    stream.write_all(&frame)
+        .map_err(|e| format!("Failed to send command: {}", e))?;
+
+    // Read the command response
+    stream.read_exact(&mut header)
+        .map_err(|e| format!("Failed to read response header: {}", e))?;
+
+    let len = (header[1] & 0x7F) as usize;
+    let mut response_payload = vec![0u8; len];
+    stream.read_exact(&mut response_payload)
+        .map_err(|e| format!("Failed to read response: {}", e))?;
+
+    Ok(String::from_utf8_lossy(&response_payload).to_string())
+}
+
+/// Attach overlay to the game process
+#[tauri::command]
+fn overlay_attach(game: String, state: State<'_, Arc<AppState>>) -> Result<String, String> {
+    let command = serde_json::json!({
+        "command": "attach",
+        "game": game
+    }).to_string();
+
+    // Use longer timeout (30s) for attach - injection takes time
+    let result = send_overlay_command_with_timeout(&command, 30)?;
+
+    // Parse the result to check if attach was successful
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&result) {
+        if json.get("success").and_then(|v| v.as_bool()) == Some(true) {
+            *state.overlay_connected.lock().unwrap() = true;
+        }
+    }
+
+    Ok(result)
+}
+
+/// Detach overlay from the game
+#[tauri::command]
+fn overlay_detach(state: State<'_, Arc<AppState>>) -> Result<String, String> {
+    let command = serde_json::json!({
+        "command": "detach"
+    }).to_string();
+
+    let result = send_overlay_command(&command)?;
+    *state.overlay_connected.lock().unwrap() = false;
+    Ok(result)
+}
+
+/// Show station overlay in game
+#[tauri::command]
+fn overlay_show(
+    station: String,
+    signal: String,
+    logo: Option<String>,
+    now_playing: Option<String>,
+    rtl: Option<bool>,
+) -> Result<String, String> {
+    let command = serde_json::json!({
+        "command": "show",
+        "station": station,
+        "signal": signal,
+        "logo": logo,
+        "nowPlaying": now_playing.unwrap_or_else(|| "Now playing:".to_string()),
+        "rtl": rtl.unwrap_or(false)
+    }).to_string();
+
+    send_overlay_command(&command)
+}
+
+/// Hide the overlay
+#[tauri::command]
+fn overlay_hide() -> Result<String, String> {
+    let command = serde_json::json!({
+        "command": "hide"
+    }).to_string();
+
+    send_overlay_command(&command)
+}
+
+/// Get overlay status
+#[tauri::command]
+fn overlay_status(state: State<'_, Arc<AppState>>) -> bool {
+    *state.overlay_connected.lock().unwrap()
 }
 
 // ============================================================================
@@ -403,6 +749,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             telemetry_get,
@@ -417,6 +764,21 @@ pub fn run() {
             plugin_get_status,
             plugin_install,
             plugin_uninstall,
+            // Remote control
+            remote_enable,
+            remote_disable,
+            remote_status,
+            remote_get_url,
+            remote_update_state,
+            remote_get_command_rx,
+            // Overlay
+            overlay_start,
+            overlay_stop,
+            overlay_attach,
+            overlay_detach,
+            overlay_show,
+            overlay_hide,
+            overlay_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

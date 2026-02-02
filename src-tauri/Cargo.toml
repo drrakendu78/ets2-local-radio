@@ -13,17 +13,26 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["devtools"] }
 tauri-plugin-shell = "2"
+tauri-plugin-global-shortcut = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
-axum = "0.7"
+axum = { version = "0.7", features = ["ws"] }
 tower-http = { version = "0.5", features = ["cors", "fs"] }
 reqwest = { version = "0.12", features = ["json"] }
 shared_memory = "0.12"
 memmap2 = "0.9"
 dirs = "5"
+# Remote control dependencies
+rand = "0.8"
+qrcode = "0.14"
+image = { version = "0.25", default-features = false, features = ["png"] }
+base64 = "0.22"
+uuid = { version = "1", features = ["v4"] }
+local-ip-address = "0.6"
+futures-util = "0.3"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = [
@@ -31,6 +40,10 @@ windows = { version = "0.58", features = [
     "Win32_System_Memory",
     "Win32_Security"
 ] }
+
+[profile.release]
+lto = false
+opt-level = 2
 
 [features]
 default = ["custom-protocol"]

@@ -20,15 +20,13 @@
     <script src="lib/js/hls.js"></script>
     <script src="lib/js/jquery-3.1.1.js"></script>
     <script src="config.js"></script>
-    <script src="lib/js/main.js"></script>
-    <script src="lib/js/peer.js"></script>
-    <script src="lib/js/remote-control.js"></script>
+    <script src="lib/js/main.js?v=2"></script>
     <script src="lib/js/main-modern.js" defer></script>
-    <script src="lib/js/tauri-bridge.js" defer></script>
+    <script src="lib/js/tauri-bridge.js?v=2" defer></script>
 </head>
 <body>
     <!-- Hidden Audio Elements -->
-    <audio id="player" src="about:blank" loop></audio>
+    <audio id="player" loop></audio>
     <audio id="whitenoise" src="lib/audio/whitestatic.mp3" loop></audio>
     <audio id="switchStation" src="lib/audio/radio_switch.mp3" loop></audio>
     <script>
@@ -263,7 +261,7 @@
             <div class="alert alert-primary update" style="display: none;">
                 <i class="fa-solid fa-circle-up"></i>
                 <span class="lang-update-available">An update is available!</span>
-                <a href="https://github.com/Koenvh1/ets2-local-radio/releases" target="_blank" class="btn-filled" style="margin-left: auto;">
+                <a href="https://github.com/drrakendu78/ets2-local-radio/releases" target="_blank" class="btn-filled" style="margin-left: auto;">
                     <span class="lang-update-now">Update now</span>
                 </a>
             </div>
@@ -277,19 +275,10 @@
         <!-- Action Buttons -->
         <div class="action-bar hidden-mobile" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--spacing-lg);">
             <div style="display: flex; gap: var(--spacing-sm);">
-                <a href="https://koenvh.nl/projects/ets2-local-radio/submit-station" target="_blank" class="btn-outlined">
-                    <i class="fa-solid fa-plus"></i>
-                    <span class="lang-submit-station">Submit a new station</span>
-                </a>
-                <a href="https://koenvh.nl/projects/ets2-local-radio/broken-station" target="_blank" class="btn-outlined">
+                <a href="https://github.com/drrakendu78/ets2-local-radio/issues" target="_blank" class="btn-outlined">
                     <i class="fa-solid fa-bug"></i>
-                    <span class="lang-broken-station">Report a broken station</span>
+                    <span class="lang-report-issue">Report an issue</span>
                 </a>
-            </div>
-            <div class="badge">
-                <i class="fa-solid fa-fingerprint"></i>
-                <span class="lang-this-peerid">PeerID:</span>
-                <span class="peer-id">00000</span>
             </div>
         </div>
 
@@ -319,17 +308,9 @@
                     <i class="fa-solid fa-gamepad"></i>
                     <span class="game">ets2</span>
                 </span>
-                <span class="footer-info-item">
-                    <i class="fa-solid fa-fingerprint"></i>
-                    PeerID: <span class="peer-id">00000</span>
-                </span>
             </div>
 
             <div class="footer-actions">
-                <button onclick="toggleTheme();" class="btn-outlined">
-                    <i class="fa-solid fa-circle-half-stroke"></i>
-                    <span class="lang-chgtheme">Switch Theme</span>
-                </button>
                 <button onclick="g_show_all = !g_show_all;" class="btn-outlined">
                     <i class="fa-solid fa-radio"></i>
                     <span class="lang-show-all">Toggle show all</span>
@@ -345,21 +326,15 @@
                 </div>
             </div>
 
-            <div style="margin-top: var(--spacing-md);">
-                <form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top" style="display: inline-block;">
-                    <input type="hidden" name="cmd" value="_s-xclick">
-                    <input type="hidden" name="hosted_button_id" value="KAX2AA9B85BAE">
-                    <button type="submit" class="btn-filled" style="background: #0070BA;">
-                        <i class="fa-brands fa-paypal"></i>
-                        Donate
-                    </button>
-                </form>
+            <div style="margin-top: var(--spacing-md); text-align: center;">
+                <a href="https://github.com/drrakendu78" target="_blank" class="btn-outlined">
+                    <i class="fa-brands fa-github"></i>
+                    Drrakendu78
+                </a>
             </div>
-
-            <a href="http://koenvh.nl" target="_blank" class="footer-logo">
-                <img src="lib/img/koenvh.png" alt="Koenvh" id="koenvhLogo" style="height: 30px;">
-            </a>
-            <p style="font-size: 12px; color: var(--md-sys-color-on-surface-variant); margin: 0;" class="lang-author"></p>
+            <p style="font-size: 12px; color: var(--md-sys-color-on-surface-variant); margin: var(--spacing-sm) 0 0 0; text-align: center;">
+                Tauri Edition - Based on <a href="https://github.com/Koenvh1/ets2-local-radio" target="_blank" style="color: var(--md-sys-color-primary);">ETS2 Local Radio</a> by Koenvh1
+            </p>
         </div>
     </footer>
 
@@ -400,24 +375,37 @@
         </div>
     </div>
 
-    <!-- Connect Modal -->
+    <!-- Connect Modal (Remote Control) -->
     <div class="modal-backdrop" id="connectModal" onclick="if(event.target === this) this.classList.remove('show')">
         <div class="modal-content">
             <div class="modal-header">
-                <h4 class="modal-title lang-enter-peerid-title">Enter the PeerID</h4>
+                <h4 class="modal-title">
+                    <i class="fa-solid fa-mobile-screen"></i>
+                    <span class="lang-remote-control">Remote Control</span>
+                </h4>
                 <button class="modal-close" onclick="document.getElementById('connectModal').classList.remove('show')">
                     <i class="fa-solid fa-xmark"></i>
                 </button>
             </div>
             <div class="modal-body">
-                <p class="lang-enter-peerid-body">Please enter the PeerID you see on the device you want to connect to:</p>
-                <input type="tel" pattern="[0-9]*" class="modal-input" maxlength="5" name="connectText" id="connectText" placeholder="00000">
-            </div>
-            <div class="modal-footer">
-                <button class="btn-filled" style="width: 100%;" onclick="connect($('#connectText').val()); document.getElementById('connectModal').classList.remove('show');">
-                    <i class="fa-solid fa-link"></i>
-                    <span class="lang-connect">Connect</span>
-                </button>
+                <!-- Remote Control Toggle -->
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--spacing-md); padding: var(--spacing-sm); background: var(--md-sys-color-surface-container); border-radius: var(--radius-md);">
+                    <span style="display: flex; align-items: center; gap: var(--spacing-xs);">
+                        <i class="fa-solid fa-tower-broadcast"></i>
+                        <span class="lang-enable-remote">Enable Remote Control</span>
+                    </span>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="remoteControlToggle" onchange="toggleRemoteControl()">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+
+                <!-- QR Code Container -->
+                <div id="qrCodeContainer" style="display: none; text-align: center; padding: var(--spacing-md); background: var(--md-sys-color-surface-container); border-radius: var(--radius-md);">
+                    <img id="qrCodeImage" alt="QR Code" style="max-width: 200px; border-radius: var(--radius-sm); background: white; padding: 10px;">
+                    <p style="margin-top: var(--spacing-sm); font-size: 13px; color: var(--md-sys-color-on-surface-variant);" class="lang-scan-qr">Scan with your phone to control</p>
+                    <p id="remoteUrl" style="margin-top: var(--spacing-xs); font-size: 11px; color: var(--md-sys-color-primary); word-break: break-all; cursor: pointer;" onclick="navigator.clipboard.writeText(this.textContent); showSnackbar('URL copied!');" title="Click to copy"></p>
+                </div>
             </div>
         </div>
     </div>

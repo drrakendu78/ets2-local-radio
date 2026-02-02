@@ -52,16 +52,32 @@
     function showWelcomeScreen() {
         document.body.classList.add('show-welcome');
         const welcomeScreen = document.getElementById('welcomeScreen');
+        const navbar = document.querySelector('.navbar');
+        const footer = document.querySelector('.footer');
         if (welcomeScreen) {
             welcomeScreen.style.display = 'block';
+        }
+        if (navbar) {
+            navbar.style.display = 'none';
+        }
+        if (footer) {
+            footer.style.display = 'none';
         }
     }
 
     function hideWelcomeScreen() {
         document.body.classList.remove('show-welcome');
         const welcomeScreen = document.getElementById('welcomeScreen');
+        const navbar = document.querySelector('.navbar');
+        const footer = document.querySelector('.footer');
         if (welcomeScreen) {
             welcomeScreen.style.display = 'none';
+        }
+        if (navbar) {
+            navbar.style.display = 'flex';
+        }
+        if (footer) {
+            footer.style.display = 'block';
         }
     }
 
@@ -134,10 +150,10 @@
         }
     }
 
-    // Skip welcome screen
+    // Skip welcome screen (temporary - will show again on next restart)
     window.skipWelcome = function() {
         welcomeSkipped = true;
-        localStorage.setItem('welcomeSkipped', 'true');
+        // Don't save to localStorage - welcome will show again on restart
         hideWelcomeScreen();
     };
 
@@ -477,6 +493,14 @@
             await invoke('plugin_uninstall', { game: 'ets2' }).catch(() => {});
             await invoke('plugin_uninstall', { game: 'ats' }).catch(() => {});
 
+            // Reset welcome screen state
+            localStorage.removeItem('welcomeSkipped');
+            welcomeSkipped = false;
+
+            // Show welcome screen immediately
+            showWelcomeScreen();
+
+            // Show notification
             const snackbar = document.getElementById('snackbar');
             if (snackbar) {
                 snackbar.innerHTML = '<i class="fa-solid fa-check-circle"></i> Plugins uninstalled';
@@ -491,26 +515,111 @@
     };
 
     // =========================================================================
-    // Keyboard Shortcuts
+    // Global Keyboard Shortcuts (work even when game is in foreground)
     // =========================================================================
 
     const defaultKeyBindings = {
-        next: 'Next',
-        prev: 'PageUp',
+        next: 'F11',
+        prev: 'F10',
         stop: 'End',
-        volup: 'OemPlus',
-        voldown: 'OemMinus',
+        volup: 'NumpadAdd',
+        voldown: 'NumpadSubtract',
         fav: 'Pause'
+    };
+
+    // Migration map for old key names to new defaults
+    const keyMigration = {
+        'Next': 'F11',
+        'PageDown': 'F11',
+        'PageUp': 'F10',
+        'OemPlus': 'NumpadAdd',
+        'OemMinus': 'NumpadSubtract',
+        '+': 'NumpadAdd',
+        '-': 'NumpadSubtract'
     };
 
     let keyBindings = { ...defaultKeyBindings };
     let capturingKey = null;
+    let globalShortcutsRegistered = false;
+
+    // Get the global shortcut plugin API
+    function getGlobalShortcut() {
+        if (window.__TAURI__?.globalShortcut) {
+            return window.__TAURI__.globalShortcut;
+        }
+        return null;
+    }
+
+    // Debounce map to prevent double-triggering
+    const lastShortcutTime = {};
+    const DEBOUNCE_MS = 300;
+
+    // Register all global shortcuts
+    async function registerGlobalShortcuts() {
+        const gs = getGlobalShortcut();
+        if (!gs) {
+            console.log('Global shortcut plugin not available');
+            return;
+        }
+
+        // First unregister any existing shortcuts
+        await unregisterGlobalShortcuts();
+
+        try {
+            for (const [action, key] of Object.entries(keyBindings)) {
+                if (!key) continue;
+
+                try {
+                    await gs.register(key, (shortcut) => {
+                        // Debounce to prevent double-triggering
+                        const now = Date.now();
+                        if (lastShortcutTime[action] && (now - lastShortcutTime[action]) < DEBOUNCE_MS) {
+                            return; // Skip, too soon
+                        }
+                        lastShortcutTime[action] = now;
+
+                        console.log('Global shortcut triggered:', action);
+                        executeAction(action);
+                    });
+                    console.log(`Registered global shortcut: ${key} -> ${action}`);
+                } catch (e) {
+                    console.warn(`Failed to register shortcut ${key}:`, e);
+                }
+            }
+            globalShortcutsRegistered = true;
+            console.log('Global shortcuts registered successfully');
+        } catch (error) {
+            console.error('Error registering global shortcuts:', error);
+        }
+    }
+
+    // Unregister all global shortcuts
+    async function unregisterGlobalShortcuts() {
+        const gs = getGlobalShortcut();
+        if (!gs) return;
+
+        try {
+            await gs.unregisterAll();
+            globalShortcutsRegistered = false;
+        } catch (error) {
+            console.error('Error unregistering global shortcuts:', error);
+        }
+    }
 
     function loadKeyboardSettings() {
         const saved = localStorage.getItem('keyBindings');
         if (saved) {
             try {
-                keyBindings = { ...defaultKeyBindings, ...JSON.parse(saved) };
+                const parsed = JSON.parse(saved);
+                // Migrate old key names to new ones
+                for (const [action, key] of Object.entries(parsed)) {
+                    if (keyMigration[key]) {
+                        parsed[action] = keyMigration[key];
+                    }
+                }
+                keyBindings = { ...defaultKeyBindings, ...parsed };
+                // Save migrated values
+                localStorage.setItem('keyBindings', JSON.stringify(keyBindings));
             } catch (e) {
                 keyBindings = { ...defaultKeyBindings };
             }
@@ -531,6 +640,9 @@
                 welcomeInput.dataset.key = key;
             }
         }
+
+        // Register global shortcuts after loading settings
+        registerGlobalShortcuts();
     }
 
     window.captureKey = function(input, action) {
@@ -548,7 +660,19 @@
             e.preventDefault();
             e.stopPropagation();
 
-            const keyName = e.key === ' ' ? 'Space' : e.key;
+            // Convert key to format expected by global shortcut plugin
+            let keyName = e.code; // Use e.code for more consistent key names
+
+            // Handle special keys
+            if (e.key === ' ') keyName = 'Space';
+            else if (e.key === '+' || e.code === 'NumpadAdd') keyName = 'NumpadAdd';
+            else if (e.key === '-' || e.code === 'NumpadSubtract') keyName = 'NumpadSubtract';
+            else if (e.key === '*' || e.code === 'NumpadMultiply') keyName = 'NumpadMultiply';
+            else if (e.key === '/' || e.code === 'NumpadDivide') keyName = 'NumpadDivide';
+            else if (e.code.startsWith('Key')) keyName = e.code.replace('Key', ''); // KeyA -> A
+            else if (e.code.startsWith('Digit')) keyName = e.code.replace('Digit', ''); // Digit1 -> 1
+            else keyName = e.key; // F1, F2, etc.
+
             input.value = keyName;
             input.dataset.key = keyName;
             input.classList.remove('capturing');
@@ -803,12 +927,15 @@
     // Save Settings
     // =========================================================================
 
-    window.saveSettings = function() {
+    window.saveSettings = async function() {
         // Save keyboard bindings
         localStorage.setItem('keyBindings', JSON.stringify(keyBindings));
 
         // Save controller bindings
         localStorage.setItem('buttonBindings', JSON.stringify(buttonBindings));
+
+        // Re-register global shortcuts with new bindings
+        await registerGlobalShortcuts();
 
         // Close modal
         document.getElementById('settingsModal').classList.remove('show');
@@ -823,12 +950,15 @@
     };
 
     // Save settings from welcome screen and continue
-    window.saveSettingsAndContinue = function() {
+    window.saveSettingsAndContinue = async function() {
         // Save keyboard bindings
         localStorage.setItem('keyBindings', JSON.stringify(keyBindings));
 
         // Save controller bindings
         localStorage.setItem('buttonBindings', JSON.stringify(buttonBindings));
+
+        // Re-register global shortcuts with new bindings
+        await registerGlobalShortcuts();
 
         // Mark welcome as completed (not just skipped)
         welcomeSkipped = true;
@@ -846,22 +976,608 @@
         }
     };
 
-    // Global keyboard shortcut handler
+    // Local keyboard shortcut handler (fallback when window is focused)
+    // This is complementary to global shortcuts - handles when in app but global fails
     document.addEventListener('keydown', function(e) {
         // Don't handle if in input field or capturing
         if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
         if (capturingKey) return;
 
-        const key = e.key === ' ' ? 'Space' : e.key;
+        // Use e.code for consistency with global shortcuts
+        let keyCode = e.code;
+        if (e.key === ' ') keyCode = 'Space';
+        else if (e.code.startsWith('Key')) keyCode = e.code.replace('Key', '');
+        else if (e.code.startsWith('Digit')) keyCode = e.code.replace('Digit', '');
+        else keyCode = e.key;
 
         for (const [action, boundKey] of Object.entries(keyBindings)) {
-            if (key === boundKey) {
+            if (keyCode === boundKey || e.key === boundKey || e.code === boundKey) {
                 e.preventDefault();
                 executeAction(action);
                 break;
             }
         }
     });
+
+    // =========================================================================
+    // Remote Control Functions
+    // =========================================================================
+
+    window.toggleRemoteControl = async function() {
+        const toggle = document.getElementById('remoteControlToggle');
+        const qrContainer = document.getElementById('qrCodeContainer');
+        const qrImage = document.getElementById('qrCodeImage');
+        const remoteUrlEl = document.getElementById('remoteUrl');
+
+        if (!toggle) return;
+
+        const enabled = toggle.checked;
+
+        if (enabled) {
+            try {
+                console.log('Enabling remote control...');
+                const qrDataUrl = await invoke('remote_enable');
+                if (qrDataUrl && qrImage) {
+                    qrImage.src = qrDataUrl;
+                }
+
+                // Get and display the URL
+                try {
+                    const url = await invoke('remote_get_url');
+                    if (remoteUrlEl && url) {
+                        remoteUrlEl.textContent = url;
+                    }
+                } catch (e) {
+                    console.log('Could not get remote URL:', e);
+                }
+
+                if (qrContainer) {
+                    qrContainer.style.display = 'block';
+                }
+                showSnackbar('Remote control enabled');
+            } catch (error) {
+                console.error('Failed to enable remote control:', error);
+                toggle.checked = false;
+                showSnackbar('Failed to enable remote control');
+            }
+        } else {
+            try {
+                console.log('Disabling remote control...');
+                await invoke('remote_disable');
+                if (qrContainer) {
+                    qrContainer.style.display = 'none';
+                }
+                if (remoteUrlEl) {
+                    remoteUrlEl.textContent = '';
+                }
+                showSnackbar('Remote control disabled');
+            } catch (error) {
+                console.error('Failed to disable remote control:', error);
+            }
+        }
+    };
+
+    // Update remote control state when radio state changes
+    window.updateRemoteState = async function() {
+        try {
+            const status = await invoke('remote_status');
+            if (status) {
+                const player = document.getElementById('player');
+                const stationNameEl = document.querySelector('.current-station') || document.querySelector('.station-name');
+
+                // Get station name from various possible sources
+                let stationName = '-';
+                if (stationNameEl) {
+                    stationName = stationNameEl.textContent || '-';
+                } else if (typeof g_current_name !== 'undefined' && g_current_name) {
+                    stationName = g_current_name;
+                }
+
+                // Get country name
+                let countryName = '-';
+                if (typeof g_current_country !== 'undefined' && g_current_country) {
+                    if (typeof country_properties !== 'undefined' && country_properties[g_current_country]) {
+                        countryName = country_properties[g_current_country].name || g_current_country;
+                    } else {
+                        countryName = g_current_country;
+                    }
+                }
+
+                // Send current radio state to remote server
+                await invoke('remote_update_state', {
+                    stationId: (typeof g_current_url !== 'undefined' ? g_current_url : '') || '',
+                    stationName: stationName,
+                    country: countryName,
+                    volume: (typeof g_volume !== 'undefined' ? g_volume : 1) || 1,
+                    playing: player ? !player.paused : false,
+                    muted: player ? (player.muted || false) : false
+                });
+            }
+        } catch (error) {
+            // Silently fail if remote not enabled
+        }
+    };
+
+    // Note: Remote state update is now integrated into the unified setStation hook below
+    // (in the overlay section) which waits for main.js to load
+
+    // Hook into play/pause to update remote state
+    document.addEventListener('DOMContentLoaded', function() {
+        const player = document.getElementById('player');
+        if (player) {
+            player.addEventListener('play', () => window.updateRemoteState());
+            player.addEventListener('pause', () => window.updateRemoteState());
+            player.addEventListener('volumechange', () => window.updateRemoteState());
+        }
+    });
+
+    // Poll for remote commands
+    let remoteEnabled = false;
+    setInterval(async function() {
+        try {
+            const status = await invoke('remote_status');
+            remoteEnabled = status;
+            if (!status) return;
+
+            // Update state periodically
+            await window.updateRemoteState();
+
+            // Check for commands from mobile
+            let cmd = await invoke('remote_get_command_rx');
+            while (cmd) {
+                console.log('Remote command received:', cmd);
+
+                // Handle volume:value format
+                if (cmd.startsWith('volume:')) {
+                    const value = parseFloat(cmd.split(':')[1]);
+                    if (!isNaN(value)) {
+                        g_volume = value;
+                        localStorage.setItem('volume', value);
+                        $('#volumeControl').val(value * 100);
+                        if (typeof updateVolume === 'function') {
+                            updateVolume();
+                        }
+                    }
+                } else {
+                    switch (cmd) {
+                        case 'next':
+                            if (typeof nextStation === 'function') {
+                                nextStation(1);
+                            }
+                            break;
+                        case 'prev':
+                            if (typeof nextStation === 'function') {
+                                nextStation(-1);
+                            }
+                            break;
+                        case 'play':
+                            document.getElementById('player').play();
+                            break;
+                        case 'pause':
+                            document.getElementById('player').pause();
+                            break;
+                        case 'togglePlay':
+                            if (typeof togglePlay === 'function') {
+                                togglePlay();
+                            }
+                            break;
+                        case 'mute':
+                            document.getElementById('player').muted = true;
+                            break;
+                        case 'unmute':
+                            document.getElementById('player').muted = false;
+                            break;
+                        case 'favourite':
+                            if (typeof setCurrentAsFavourite === 'function') {
+                                setCurrentAsFavourite();
+                            }
+                            break;
+                    }
+                }
+
+                // Check for more commands
+                cmd = await invoke('remote_get_command_rx');
+            }
+        } catch (error) {
+            // Silently fail
+        }
+    }, 250); // Poll more frequently
+
+    // Helper function for snackbar notifications
+    function showSnackbar(message) {
+        const snackbar = document.getElementById('snackbar');
+        if (snackbar) {
+            snackbar.textContent = message;
+            snackbar.classList.add('show');
+            setTimeout(() => {
+                snackbar.classList.remove('show');
+            }, 3000);
+        }
+    }
+
+    // =========================================================================
+    // In-Game Overlay Functions (always enabled like original)
+    // =========================================================================
+
+    let overlayEnabled = true; // Always enabled like the original
+    let overlayAttached = false;
+    let overlayBridgeStarted = false;
+
+    // Auto-start overlay bridge on load
+    document.addEventListener('DOMContentLoaded', async function() {
+        // Update toggle if it exists
+        const toggle = document.getElementById('overlayToggle');
+        if (toggle) {
+            toggle.checked = true;
+        }
+
+        // Start overlay bridge automatically
+        console.log('Auto-starting overlay bridge...');
+        try {
+            await startOverlayBridge();
+            overlayBridgeStarted = true;
+        } catch (e) {
+            console.warn('Could not auto-start overlay bridge:', e);
+        }
+    });
+
+    // Start the overlay bridge process
+    window.startOverlayBridge = async function() {
+        try {
+            const result = await invoke('overlay_start');
+            console.log('Overlay bridge started:', result);
+            return true;
+        } catch (error) {
+            console.error('Failed to start overlay bridge:', error);
+            showSnackbar('Failed to start overlay: ' + error);
+            return false;
+        }
+    };
+
+    // Stop the overlay bridge process
+    window.stopOverlayBridge = async function() {
+        try {
+            await invoke('overlay_stop');
+            overlayAttached = false;
+            console.log('Overlay bridge stopped');
+            return true;
+        } catch (error) {
+            console.error('Failed to stop overlay bridge:', error);
+            return false;
+        }
+    };
+
+    // Attach overlay to the game
+    window.attachOverlay = async function(game) {
+        try {
+            // Ensure bridge is running
+            if (!overlayBridgeStarted) {
+                console.log('Starting overlay bridge first...');
+                const started = await startOverlayBridge();
+                if (!started) {
+                    console.error('Failed to start overlay bridge');
+                    return false;
+                }
+                overlayBridgeStarted = true;
+                // Wait for bridge to fully start
+                await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+
+            // Attach to game
+            console.log('Sending attach command for game:', game || 'ets2');
+            const result = await invoke('overlay_attach', { game: game || 'ets2' });
+            console.log('Attach result:', result);
+
+            // Parse JSON response
+            let parsed = null;
+            try {
+                parsed = typeof result === 'string' ? JSON.parse(result) : result;
+            } catch (e) {
+                console.log('Could not parse attach result as JSON:', result);
+            }
+
+            // Check if attach was successful
+            if (parsed && parsed.success === true) {
+                overlayAttached = true;
+                console.log('Overlay attached successfully to', parsed.game);
+                return true;
+            } else if (parsed && parsed.success === false) {
+                console.log('Attach failed - game process not found');
+                overlayAttached = false;
+                return false;
+            } else if (result && typeof result === 'string') {
+                // Fallback for string responses
+                if (result.includes('"success":true') || result.includes('Attached')) {
+                    overlayAttached = true;
+                    return true;
+                }
+            }
+
+            console.log('Unknown attach result:', result);
+            overlayAttached = false;
+            return false;
+        } catch (error) {
+            console.error('Failed to attach overlay:', error);
+            overlayAttached = false;
+            return false;
+        }
+    };
+
+    // Detach overlay from game
+    window.detachOverlay = async function() {
+        try {
+            await invoke('overlay_detach');
+            overlayAttached = false;
+            console.log('Overlay detached');
+            return true;
+        } catch (error) {
+            console.error('Failed to detach overlay:', error);
+            return false;
+        }
+    };
+
+    // Show station overlay in game
+    window.showOverlay = async function(stationName, signal, logoPath, nowPlayingText, rtl) {
+        if (!overlayEnabled || !overlayAttached) return;
+
+        try {
+            await invoke('overlay_show', {
+                station: stationName || '',
+                signal: String(signal || '5'),
+                logo: logoPath || null,
+                nowPlaying: nowPlayingText || null,
+                rtl: rtl || false
+            });
+            console.log('Overlay shown:', stationName);
+        } catch (error) {
+            console.error('Failed to show overlay:', error);
+        }
+    };
+
+    // Hide the overlay
+    window.hideOverlay = async function() {
+        try {
+            await invoke('overlay_hide');
+        } catch (error) {
+            console.error('Failed to hide overlay:', error);
+        }
+    };
+
+    // Toggle overlay on/off
+    window.toggleOverlay = async function() {
+        const toggle = document.getElementById('overlayToggle');
+        if (!toggle) {
+            console.error('Overlay toggle element not found!');
+            return;
+        }
+
+        overlayEnabled = toggle.checked;
+        localStorage.setItem('overlayEnabled', overlayEnabled);
+        console.log('Overlay toggled:', overlayEnabled);
+
+        if (overlayEnabled) {
+            // Start the overlay bridge first
+            console.log('Starting overlay bridge...');
+            const bridgeStarted = await startOverlayBridge();
+            console.log('Bridge started:', bridgeStarted);
+
+            if (!bridgeStarted) {
+                toggle.checked = false;
+                overlayEnabled = false;
+                localStorage.setItem('overlayEnabled', 'false');
+                return;
+            }
+
+            // Try to attach to game
+            const game = typeof g_game !== 'undefined' ? g_game : 'ets2';
+            console.log('Attaching to game:', game);
+            const success = await attachOverlay(game);
+            console.log('Attach result:', success, 'overlayAttached:', overlayAttached);
+
+            if (success) {
+                showSnackbar('In-game overlay enabled - will show when changing stations');
+            } else {
+                // Keep overlay enabled but inform user
+                showSnackbar('Overlay enabled - will activate when game starts');
+            }
+        } else {
+            await detachOverlay();
+            await stopOverlayBridge();
+            showSnackbar('In-game overlay disabled');
+        }
+    };
+
+    // Get overlay status
+    window.getOverlayStatus = async function() {
+        try {
+            return await invoke('overlay_status');
+        } catch (error) {
+            return false;
+        }
+    };
+
+    // Hook into setRadioStation to show overlay when station changes
+    // We need to wait for main.js to load and define setRadioStation
+    let overlayHookInstalled = false;
+
+    function installOverlayHook() {
+        if (overlayHookInstalled) return true;
+
+        const originalSetRadioStation = window.setRadioStation;
+        if (!originalSetRadioStation) {
+            return false; // Not ready yet
+        }
+
+        window.setRadioStation = function(url, country, volume) {
+            const result = originalSetRadioStation.call(this, url, country, volume);
+
+            // Find the station info from global stations array
+            let stationName = '';
+            let stationLogo = '';
+            let signalLevel = '5';
+
+            console.log('setRadioStation args: url=', url, 'country=', country, 'g_stations length=', typeof g_stations !== 'undefined' ? g_stations.length : 0);
+
+            if (typeof g_stations !== 'undefined' && Array.isArray(g_stations)) {
+                // Debug: show first matching station by url only
+                const matchByUrl = g_stations.find(s => s.url === url);
+                const matchByCountry = g_stations.filter(s => s.country === country).slice(0, 3);
+                console.log('Match by URL:', matchByUrl ? JSON.stringify(matchByUrl) : 'not found');
+                console.log('Stations in country (first 3):', matchByCountry.map(s => ({name: s.name, Name: s.Name, url: s.url})));
+                // Show first station structure
+                if (g_stations.length > 0) {
+                    console.log('First station structure:', Object.keys(g_stations[0]));
+                }
+
+                for (let i = 0; i < g_stations.length; i++) {
+                    if (g_stations[i].url === url) {  // Match by URL only, country might differ
+                        // Try both lowercase and capitalized property names
+                        stationName = g_stations[i].name || g_stations[i].Name || '';
+                        stationLogo = g_stations[i].logo || g_stations[i].Logo || '';
+                        // Calculate signal from volume/whitenoise
+                        if (typeof volume !== 'undefined' && volume !== null) {
+                            const reception = Math.pow(parseFloat(volume), 2) - 0.15;
+                            if (reception < 0.05) signalLevel = '5';
+                            else if (reception < 0.20) signalLevel = '4';
+                            else if (reception < 0.35) signalLevel = '3';
+                            else if (reception < 0.50) signalLevel = '2';
+                            else if (reception < 0.75) signalLevel = '1';
+                            else signalLevel = '0';
+                        }
+                        console.log('Station found:', stationName, 'logo:', stationLogo);
+                        break;
+                    }
+                }
+            }
+
+            // Fallback: search in global 'stations' object which has names
+            if (!stationName && typeof stations !== 'undefined' && country && stations[country]) {
+                const countryStations = stations[country];
+                for (let i = 0; i < countryStations.length; i++) {
+                    if (countryStations[i].url === url) {
+                        stationName = countryStations[i].name || '';
+                        stationLogo = countryStations[i].logo || '';
+                        console.log('Found in stations[country]:', stationName, 'logo:', stationLogo);
+                        break;
+                    }
+                }
+            }
+
+            // Fallback: use g_current_name if available
+            if (!stationName && typeof g_current_name !== 'undefined' && g_current_name) {
+                stationName = g_current_name;
+                console.log('Using g_current_name as fallback:', stationName);
+            }
+
+            console.log('setRadioStation called:', stationName, '| overlayEnabled:', overlayEnabled, '| overlayAttached:', overlayAttached);
+
+            // Update remote control state after station change
+            setTimeout(() => window.updateRemoteState(), 100);
+
+            // Show overlay if enabled and we have a station name
+            if (overlayEnabled && overlayAttached && stationName) {
+                // Get localized "Now playing" text
+                let nowPlayingText = 'Now playing:';
+                if (typeof g_translation !== 'undefined' && g_translation.web && g_translation.web['now-playing']) {
+                    nowPlayingText = g_translation.web['now-playing'];
+                }
+
+                // Determine RTL (for Hebrew, Arabic, etc.)
+                let isRtl = false;
+                if (typeof g_language !== 'undefined') {
+                    isRtl = g_language.startsWith('he') || g_language.startsWith('ar');
+                }
+
+                console.log('Showing overlay for:', stationName);
+                showOverlay(stationName, signalLevel, stationLogo, nowPlayingText, isRtl);
+            } else {
+                console.log('Overlay not shown - enabled:', overlayEnabled, 'attached:', overlayAttached, 'station:', stationName);
+            }
+
+            return result;
+        };
+
+        overlayHookInstalled = true;
+        console.log('Overlay hook installed successfully on setRadioStation');
+        return true;
+    }
+
+    // Try to install hook now (in case main.js loaded first)
+    installOverlayHook();
+
+    // Also try after DOM is loaded
+    document.addEventListener('DOMContentLoaded', function() {
+        if (!overlayHookInstalled) {
+            installOverlayHook();
+        }
+    });
+
+    // Keep trying every 500ms until hook is installed (max 10 seconds)
+    let hookRetries = 0;
+    const hookInterval = setInterval(function() {
+        if (installOverlayHook() || hookRetries >= 20) {
+            clearInterval(hookInterval);
+            if (!overlayHookInstalled) {
+                console.warn('Could not install overlay hook after 10 seconds');
+            }
+        }
+        hookRetries++;
+    }, 500);
+
+    // Auto-attach overlay when game is detected
+    let lastGameRunning = null;
+    let attachRetryCount = 0;
+    const MAX_ATTACH_RETRIES = 3;
+
+    async function tryAttachOverlay() {
+        if (!overlayEnabled || overlayAttached) return;
+
+        const game = typeof g_game !== 'undefined' ? g_game : 'ets2';
+        console.log('Attempting to attach overlay to', game, '(attempt', attachRetryCount + 1, ')');
+
+        try {
+            const success = await attachOverlay(game);
+            if (success) {
+                console.log('Overlay attached successfully!');
+                attachRetryCount = 0;
+            } else {
+                attachRetryCount++;
+                console.log('Attach failed, will retry...');
+            }
+        } catch (e) {
+            attachRetryCount++;
+            console.log('Attach error:', e);
+        }
+    }
+
+    setInterval(async function() {
+        if (!overlayEnabled) return;
+
+        // Only try to attach if not already attached
+        if (!overlayAttached && attachRetryCount < MAX_ATTACH_RETRIES) {
+            try {
+                const telemetry = await invoke('telemetry_get');
+                const pos = telemetry?.truck_values?.positioning?.head_position;
+                const gameRunning = pos && (pos.x !== 0 || pos.y !== 0 || pos.z !== 0);
+
+                if (gameRunning) {
+                    // Game is running - try to attach
+                    await tryAttachOverlay();
+                }
+            } catch (error) {
+                // Silently fail
+            }
+        }
+        // Don't auto-detach - keep overlay attached once successful
+    }, 3000); // Check every 3 seconds
+
+    // Also try to attach immediately after bridge starts
+    setTimeout(async function() {
+        if (overlayBridgeStarted && !overlayAttached) {
+            console.log('Initial overlay attach attempt...');
+            await tryAttachOverlay();
+        }
+    }, 3000);
 
     console.log('Tauri bridge loaded successfully');
 })();

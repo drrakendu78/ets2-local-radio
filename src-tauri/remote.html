@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#39B54A">
+    <title>ETS2 Local Radio - Remote</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        :root {
+            --primary: #39B54A;
+            --primary-dark: #2d8f3a;
+            --surface: #1a1a2e;
+            --surface-variant: #252542;
+            --on-surface: #ffffff;
+            --on-surface-variant: #b0b0c0;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--surface);
+            color: var(--on-surface);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        .container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+            max-width: 400px;
+            margin: 0 auto;
+            width: 100%;
+        }
+
+        /* Connection Status */
+        .status {
+            text-align: center;
+            padding: 10px;
+            font-size: 14px;
+            color: var(--on-surface-variant);
+        }
+
+        .status.connected {
+            color: var(--primary);
+        }
+
+        .status.error {
+            color: #ff6b6b;
+        }
+
+        /* Station Info */
+        .station-info {
+            text-align: center;
+            padding: 30px 20px;
+            background: var(--surface-variant);
+            border-radius: 16px;
+            margin-bottom: 20px;
+        }
+
+        .station-name {
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .station-country {
+            font-size: 16px;
+            color: var(--on-surface-variant);
+        }
+
+        /* Controls */
+        .controls {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 20px;
+            padding: 20px 0;
+        }
+
+        .btn {
+            width: 70px;
+            height: 70px;
+            border-radius: 50%;
+            border: none;
+            background: var(--surface-variant);
+            color: var(--on-surface);
+            font-size: 24px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.15s ease;
+        }
+
+        .btn:active {
+            transform: scale(0.95);
+            background: var(--primary-dark);
+        }
+
+        .btn-play {
+            width: 90px;
+            height: 90px;
+            background: var(--primary);
+            font-size: 32px;
+        }
+
+        .btn-play:active {
+            background: var(--primary-dark);
+        }
+
+        /* Volume */
+        .volume-section {
+            padding: 20px;
+            background: var(--surface-variant);
+            border-radius: 16px;
+            margin-bottom: 20px;
+        }
+
+        .volume-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .volume-label {
+            font-size: 14px;
+            color: var(--on-surface-variant);
+        }
+
+        .volume-value {
+            font-size: 14px;
+            color: var(--primary);
+        }
+
+        .volume-slider {
+            width: 100%;
+            height: 8px;
+            -webkit-appearance: none;
+            appearance: none;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            outline: none;
+        }
+
+        .volume-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 24px;
+            height: 24px;
+            background: var(--primary);
+            border-radius: 50%;
+            cursor: pointer;
+        }
+
+        .volume-slider::-moz-range-thumb {
+            width: 24px;
+            height: 24px;
+            background: var(--primary);
+            border-radius: 50%;
+            cursor: pointer;
+            border: none;
+        }
+
+        /* Favourite Button */
+        .favourite-section {
+            display: flex;
+            justify-content: center;
+            padding: 10px;
+        }
+
+        .btn-favourite {
+            padding: 15px 40px;
+            border-radius: 30px;
+            border: 2px solid var(--primary);
+            background: transparent;
+            color: var(--primary);
+            font-size: 16px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            transition: all 0.15s ease;
+        }
+
+        .btn-favourite:active, .btn-favourite.active {
+            background: var(--primary);
+            color: var(--on-surface);
+        }
+
+        /* Mute Button */
+        .btn-mute {
+            width: 50px;
+            height: 50px;
+            font-size: 18px;
+        }
+
+        .btn-mute.muted {
+            color: #ff6b6b;
+        }
+
+        /* Loading State */
+        .loading {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 20px;
+        }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 3px solid var(--surface-variant);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Hidden */
+        .hidden {
+            display: none !important;
+        }
+    </style>
+</head>
+<body>
+    <!-- Loading State -->
+    <div class="container loading" id="loadingState">
+        <div class="spinner"></div>
+        <p>Connecting...</p>
+    </div>
+
+    <!-- Main UI -->
+    <div class="container hidden" id="mainUI">
+        <div class="status" id="status">Connected</div>
+
+        <div class="station-info">
+            <div class="station-name" id="stationName">-</div>
+            <div class="station-country" id="stationCountry">-</div>
+        </div>
+
+        <div class="controls">
+            <button class="btn" id="btnPrev" title="Previous">
+                <i class="fa-solid fa-backward-step"></i>
+            </button>
+            <button class="btn btn-play" id="btnPlay" title="Play/Pause">
+                <i class="fa-solid fa-play" id="playIcon"></i>
+            </button>
+            <button class="btn" id="btnNext" title="Next">
+                <i class="fa-solid fa-forward-step"></i>
+            </button>
+        </div>
+
+        <div class="volume-section">
+            <div class="volume-header">
+                <span class="volume-label">
+                    <i class="fa-solid fa-volume-high"></i> Volume
+                </span>
+                <span class="volume-value" id="volumeValue">100%</span>
+            </div>
+            <input type="range" class="volume-slider" id="volumeSlider" min="0" max="100" value="100">
+        </div>
+
+        <div class="favourite-section">
+            <button class="btn-favourite" id="btnFavourite">
+                <i class="fa-solid fa-star"></i>
+                <span>Favourite</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Error State -->
+    <div class="container loading hidden" id="errorState">
+        <i class="fa-solid fa-triangle-exclamation" style="font-size: 50px; color: #ff6b6b;"></i>
+        <p id="errorMessage">Connection failed</p>
+    </div>
+
+    <script>
+        // Get token from URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const token = urlParams.get('token');
+
+        // Elements
+        const loadingState = document.getElementById('loadingState');
+        const mainUI = document.getElementById('mainUI');
+        const errorState = document.getElementById('errorState');
+        const errorMessage = document.getElementById('errorMessage');
+        const status = document.getElementById('status');
+        const stationName = document.getElementById('stationName');
+        const stationCountry = document.getElementById('stationCountry');
+        const playIcon = document.getElementById('playIcon');
+        const volumeSlider = document.getElementById('volumeSlider');
+        const volumeValue = document.getElementById('volumeValue');
+
+        // State
+        let ws = null;
+        let isPlaying = false;
+        let isMuted = false;
+
+        // Connect to WebSocket
+        function connect() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws?token=${token}`;
+
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                console.log('WebSocket connected');
+            };
+
+            ws.onmessage = (event) => {
+                const msg = JSON.parse(event.data);
+                handleMessage(msg);
+            };
+
+            ws.onclose = () => {
+                console.log('WebSocket closed');
+                showError('Connection lost');
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                showError('Connection failed');
+            };
+        }
+
+        // Handle incoming messages
+        function handleMessage(msg) {
+            switch (msg.type) {
+                case 'authResult':
+                    if (msg.success) {
+                        showMainUI();
+                    } else {
+                        showError(msg.message || 'Authentication failed');
+                    }
+                    break;
+
+                case 'state':
+                    updateState(msg);
+                    break;
+
+                case 'command':
+                    // Command acknowledgment
+                    break;
+
+                case 'error':
+                    console.error('Server error:', msg.message);
+                    break;
+            }
+        }
+
+        // Update UI with radio state
+        function updateState(state) {
+            stationName.textContent = state.station_name || '-';
+            stationCountry.textContent = state.country || '-';
+
+            isPlaying = state.playing;
+            playIcon.className = isPlaying ? 'fa-solid fa-pause' : 'fa-solid fa-play';
+
+            isMuted = state.muted;
+            document.getElementById('btnMute')?.classList.toggle('muted', isMuted);
+
+            const volume = Math.round((state.volume || 1) * 100);
+            volumeSlider.value = volume;
+            volumeValue.textContent = `${volume}%`;
+        }
+
+        // Send command
+        function sendCommand(cmd) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify(cmd));
+            }
+        }
+
+        // UI State functions
+        function showMainUI() {
+            loadingState.classList.add('hidden');
+            errorState.classList.add('hidden');
+            mainUI.classList.remove('hidden');
+            status.textContent = 'Connected';
+            status.className = 'status connected';
+        }
+
+        function showError(message) {
+            loadingState.classList.add('hidden');
+            mainUI.classList.add('hidden');
+            errorState.classList.remove('hidden');
+            errorMessage.textContent = message;
+        }
+
+        // Event Listeners
+        document.getElementById('btnPrev').addEventListener('click', () => {
+            sendCommand({ type: 'prev' });
+        });
+
+        document.getElementById('btnNext').addEventListener('click', () => {
+            sendCommand({ type: 'next' });
+        });
+
+        document.getElementById('btnPlay').addEventListener('click', () => {
+            sendCommand({ type: 'togglePlay' });
+        });
+
+        document.getElementById('btnFavourite').addEventListener('click', () => {
+            sendCommand({ type: 'favourite' });
+        });
+
+        volumeSlider.addEventListener('input', () => {
+            const value = volumeSlider.value / 100;
+            volumeValue.textContent = `${volumeSlider.value}%`;
+            sendCommand({ type: 'volume', value: value });
+        });
+
+        // Initialize
+        if (!token) {
+            showError('No token provided');
+        } else {
+            connect();
+        }
+    </script>
+</body>
+</html>

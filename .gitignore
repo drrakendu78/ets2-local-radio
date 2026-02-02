@@ -1,0 +1,18 @@
+node_modules
+
+# Rust build artifacts
+src-tauri/target/
+
+# C# build artifacts
+src-tauri/overlay-bridge/bin/
+src-tauri/overlay-bridge/obj/
+
+# IDE files
+.vs/
+*.user
+
+# Claude config
+.claude/
+
+# Windows artifacts
+nul

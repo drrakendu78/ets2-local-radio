@@ -31,7 +31,8 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "resources/*"
+      "resources/*",
+      "overlay-bridge/bin/Release/**/*"
     ],
     "windows": {
       "certificateThumbprint": null,
